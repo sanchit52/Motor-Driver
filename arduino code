@@ -1,0 +1,128 @@
+#include <util/atomic.h>
+int temp, counter = 0; //This variable will increase or decrease depending on the rotation of encoder
+volatile int posi = 0; // specify posi as volatile: https://www.arduino.cc/reference/en/language/variables/variable-scope-qualifiers/volatile/
+long prevT = 0;
+float eprev = 0;
+float eintegral = 0;
+volatile float veli=0;
+volatile float velocity_i = 0;
+float v1Filt = 0;
+float v1Prev = 0;
+float v2Filt = 0;
+float v2Prev = 0;
+int posPrev=0;
+void setup() {
+  Serial.begin (9600);
+
+  pinMode(2, INPUT_PULLUP); // internal pullup input pin 2 
+  
+  pinMode(3, INPUT_PULLUP); // internalเป็น pullup input pin 3
+   //Setting up interrupt
+  //A rising pulse from encodenren activated ai0(). AttachInterrupt 0 is DigitalPin nr 2 on moust Arduino.
+  attachInterrupt(0, ai0, RISING);
+   
+  //B rising pulse from encodenren activated ai1(). AttachInterrupt 1 is DigitalPin nr 3 on moust Arduino.
+  attachInterrupt(1, ai1, RISING);
+  }
+   
+  void loop() {
+  // Send the value of counter
+  int target=1200;
+  float velocity2 = 0;
+
+  ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+    velocity2 = velocity_i;
+  }
+  float kp = 1;
+  float kd = 0.025;
+  float ki = 0;
+  int pos=counter;
+
+  long currT = micros();
+  float deltaT = ((float) (currT - prevT))/( 1.0e6 );
+  float velocity1 = (pos - posPrev)/deltaT;
+  
+  prevT = currT;
+  posPrev=pos;
+  // derivative
+  float v1 = velocity1/600.0*60.0;
+  float v2 = velocity2/600.0*60.0;
+  
+  v1Filt = 0.854*v1Filt + 0.0728*v1 + 0.0728*v1Prev;
+  v1Prev = v1;
+  v2Filt = 0.854*v2Filt + 0.0728*v2 + 0.0728*v2Prev;
+  v2Prev = v2;
+
+  // Set a target
+  float vt = 100*(sin(currT/1e6)>0);
+  int e = vt-v1Filt;
+  float dedt = (e-eprev)/(deltaT);
+  
+
+  eintegral = eintegral + e*deltaT;
+  float u = (kp*e + kd*dedt + ki*eintegral);
+  int dir = -1;
+  if(u<0){
+    dir = 1;
+  }
+  float pwr = fabs(u);
+  if( pwr > 255 ){
+    pwr = 255;
+  }
+  setMotor(dir,pwr);
+  Serial.print(target);
+  Serial.print(" ");
+  Serial.print(counter);
+  Serial.print(" ");
+  Serial.print(u);
+  Serial.print(" ");
+  Serial.print(e);
+  Serial.print(" ");
+  Serial.print(dir);
+  Serial.println();
+  eprev=e;
+  }
+void setMotor(int dir, int pwmVal){
+  
+  if(dir == 1){
+    digitalWrite(7,LOW);
+  }
+  else if(dir == -1){
+    digitalWrite(7,HIGH);
+  }
+  else{
+    digitalWrite(7,HIGH);
+  }  
+  analogWrite(5,pwmVal);
+}
+   
+  void ai0() {
+  // ai0 is activated if DigitalPin nr 2 is going from LOW to HIGH
+  // Check pin 3 to determine the direction
+  int incr=0;
+  if(digitalRead(3)==LOW) 
+  {
+  incr--;
+  }else{
+  incr++;
+  }
+  counter+=incr;
+  long currT = micros();
+  float deltaT = ((float) (currT - prevT))/( 1.0e6 );
+  veli=incr/deltaT;
+  }
+   
+  void ai1() {
+  // ai0 is activated if DigitalPin nr 3 is going from LOW to HIGH
+  // Check with pin 2 to determine the direction
+  int incr=0;
+  if(digitalRead(2)==LOW) {
+  incr++;
+  }else{
+  incr--;
+  }
+  counter+=incr;
+  long currT = micros();
+  float deltaT = ((float) (currT - prevT))/( 1.0e6 );
+  veli=incr/deltaT;
+  }
